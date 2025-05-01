@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Матрица: Уклонение</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #game-container {
+            position: relative;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #game-canvas {
+            display: block;
+            background-color: #000;
+        }
+        .matrix-code {
+            position: absolute;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 16px;
+            opacity: 0.7;
+            user-select: none;
+        }
+        .bullet {
+            position: absolute;
+            background-color: #f00;
+            border-radius: 50%;
+        }
+        #neo {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: #0f0;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #0f0;
+            transition: all 0.1s;
+            z-index: 10;
+        }
+        #dodge-effect {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background-color: rgba(0, 255, 0, 0.3);
+            box-shadow: 0 0 30px #0f0;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body class="bg-black text-green-400 flex flex-col items-center justify-center min-h-screen p-4">
+    <div class="text-center mb-4">
+        <h1 class="text-4xl font-bold mb-2 text-green-400">МАТРИЦА: Уклонение</h1>
+        <p class="text-lg mb-4">Управляй Нео с помощью стрелок, уклоняйся от пуль агентов</p>
+        <div class="flex justify-center space-x-8 mb-6">
+            <div class="bg-black border border-green-400 p-3 rounded">
+                <span class="font-mono">Время:</span> <span id="time">0</span>s
+            </div>
+            <div class="bg-black border border-green-400 p-3 rounded">
+                <span class="font-mono">Рекорд:</span> <span id="high-score">0</span>s
+            </div>
+            <div class="bg-black border border-green-400 p-3 rounded">
+                <span class="font-mono">Уклонения:</span> <span id="dodges">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-container" class="w-full max-w-3xl h-96 relative border-2 border-green-400">
+        <canvas id="game-canvas" width="800" height="400"></canvas>
+        <div id="neo"></div>
+        <div id="dodge-effect"></div>
+    </div>
+
+    <div class="mt-6 flex space-x-4">
+        <button id="start-btn" class="px-6 py-3 bg-green-800 hover:bg-green-700 rounded font-mono text-lg">
+            НАЧАТЬ
+        </button>
+        <button id="pause-btn" class="px-6 py-3 bg-gray-800 hover:bg-gray-700 rounded font-mono text-lg" disabled>
+            ПАУЗА
+        </button>
+    </div>
+
+    <div class="mt-8 text-center max-w-2xl">
+        <p class="text-green-300 mb-2">Управление:</p>
+        <div class="grid grid-cols-3 gap-2 max-w-xs mx-auto">
+            <div></div>
+            <div class="p-3 border border-green-400 rounded text-center">↑</div>
+            <div></div>
+            <div class="p-3 border border-green-400 rounded text-center">←</div>
+            <div class="p-3 border border-green-400 rounded text-center">↓</div>
+            <div class="p-3 border border-green-400 rounded text-center">→</div>
+        </div>
+    </div>
+
+    <script>
+        // Конфигурация игры
+        const config = {
+            canvas: null,
+            ctx: null,
+            neo: null,
+            dodgeEffect: null,
+            gameWidth: 800,
+            gameHeight: 400,
+            neoSize: 40,
+            neoX: 0,
+            neoY: 0,
+            speed: 8,
+            bullets: [],
+            bulletSize: 8,
+            lastBulletTime: 0,
+            bulletInterval: 800,
+            matrixChars: "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン",
+            matrixElements: [],
+            gameTime: 0,
+            highScore: localStorage.getItem('matrixHighScore') || 0,
+            dodges: 0,
+            isPlaying: false,
+            isPaused: false,
+            gameLoopId: null,
+            lastTime: 0,
+            bulletSpeed: 5,
+            difficultyIncreaseInterval: 5000 // Увеличиваем сложность каждые 5 секунд
+        };
+
+        // Инициализация игры
+        function initGame() {
+            config.canvas = document.getElementById('game-canvas');
+            config.ctx = config.canvas.getContext('2d');
+            config.neo = document.getElementById('neo');
+            config.dodgeEffect = document.getElementById('dodge-effect');
+            
+            // Устанавливаем размеры контейнера
+            const container = document.getElementById('game-container');
+            container.style.width = `${config.gameWidth}px`;
+            container.style.height = `${config.gameHeight}px`;
+            
+            // Позиционируем Нео по центру
+            config.neoX = config.gameWidth / 2 - config.neoSize / 2;
+            config.neoY = config.gameHeight / 2 - config.neoSize / 2;
+            updateNeoPosition();
+            
+            // Инициализируем высокий счет
+            document.getElementById('high-score').textContent = config.highScore;
+            
+            // Создаем матричный эффект
+            createMatrixEffect();
+        }
+
+        // Создаем эффект падающего кода матрицы
+        function createMatrixEffect() {
+            const fontSize = 16;
+            const columns = Math.floor(config.gameWidth / fontSize);
+            
+            for (let i = 0; i < columns; i++) {
+                const x = i * fontSize;
+                const speed = 2 + Math.random() * 5;
+                const length = 5 + Math.floor(Math.random() * 10);
+                
+                config.matrixElements.push({
+                    x: x,
+                    y: -Math.random() * config.gameHeight,
+                    speed: speed,
+                    length: length,
+                    chars: []
+                });
+                
+                // Заполняем начальные символы
+                for (let j = 0; j < length; j++) {
+                    config.matrixElements[i].chars.push(
+                        config.matrixChars[Math.floor(Math.random() * config.matrixChars.length)]
+                    );
+                }
+            }
+        }
+
+        // Обновляем эффект матрицы
+        function updateMatrixEffect() {
+            config.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            config.ctx.fillRect(0, 0, config.gameWidth, config.gameHeight);
+            
+            config.ctx.font = '16px monospace';
+            config.ctx.fillStyle = '#0f0';
+            
+            config.matrixElements.forEach(column => {
+                column.y += column.speed;
+                
+                // Если колонка ушла за пределы экрана, создаем новую
+                if (column.y > config.gameHeight + column.length * 16) {
+                    column.y = -Math.random() * config.gameHeight;
+                    column.speed = 2 + Math.random() * 5;
+                    column.length = 5 + Math.floor(Math.random() * 10);
+                    column.chars = [];
+                    
+                    for (let j = 0; j < column.length; j++) {
+                        column.chars.push(
+                            config.matrixChars[Math.floor(Math.random() * config.matrixChars.length)]
+                        );
+                    }
+                }
+                
+                // Рисуем символы колонки
+                for (let i = 0; i < column.chars.length; i++) {
+                    const charY = column.y + i * 16;
+                    
+                    if (charY >= 0 && charY < config.gameHeight) {
+                        // Первый символ белый
+                        if (i === 0) {
+                            config.ctx.fillStyle = '#fff';
+                        } else if (i === 1) {
+                            config.ctx.fillStyle = '#0f0';
+                        } else {
+                            const opacity = 0.1 + 0.9 * (1 - i / column.length);
+                            config.ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+                        }
+                        
+                        config.ctx.fillText(column.chars[i], column.x, charY);
+                    }
+                    
+                    // Меняем символы случайным образом
+                    if (Math.random() < 0.05) {
+                        column.chars[i] = config.matrixChars[Math.floor(Math.random() * config.matrixChars.length)];
+                    }
+                }
+            });
+        }
+
+        // Обновляем позицию Нео
+        function updateNeoPosition() {
+            config.neo.style.left = `${config.neoX}px`;
+            config.neo.style.top = `${config.neoY}px`;
+        }
+
+        // Создаем новую пулю
+        function createBullet() {
+            // Определяем сторону экрана, откуда появится пуля (0-верх, 1-право, 2-низ, 3-лево)
+            const side = Math.floor(Math.random() * 4);
+            let x, y, dx, dy;
+            
+            switch(side) {
+                case 0: // Верх
+                    x = Math.random() * config.gameWidth;
+                    y = -config.bulletSize;
+                    dx = (Math.random() - 0.5) * 1.5;
+                    dy = 1;
+                    break;
+                case 1: // Право
+                    x = config.gameWidth + config.bulletSize;
+                    y = Math.random() * config.gameHeight;
+                    dx = -1;
+                    dy = (Math.random() - 0.5) * 1.5;
+                    break;
+                case 2: // Низ
+                    x = Math.random() * config.gameWidth;
+                    y = config.gameHeight + config.bulletSize;
+                    dx = (Math.random() - 0.5) * 1.5;
+                    dy = -1;
+                    break;
+                case 3: // Лево
+                    x = -config.bulletSize;
+                    y = Math.random() * config.gameHeight;
+                    dx = 1;
+                    dy = (Math.random() - 0.5) * 1.5;
+                    break;
+            }
+            
+            // Нормализуем вектор направления
+            const length = Math.sqrt(dx * dx + dy * dy);
+            dx = (dx / length) * config.bulletSpeed;
+            dy = (dy / length) * config.bulletSpeed;
+            
+            config.bullets.push({
+                x: x,
+                y: y,
+                dx: dx,
+                dy: dy,
+                size: config.bulletSize
+            });
+        }
+
+        // Обновляем пули
+        function updateBullets() {
+            // Создаем новые пули
+            const currentTime = Date.now();
+            if (currentTime - config.lastBulletTime > config.bulletInterval && config.bullets.length < 15) {
+                createBullet();
+                config.lastBulletTime = currentTime;
+            }
+            
+            // Обновляем позиции пуль
+            for (let i = config.bullets.length - 1; i >= 0; i--) {
+                const bullet = config.bullets[i];
+                bullet.x += bullet.dx;
+                bullet.y += bullet.dy;
+                
+                // Удаляем пули за пределами экрана
+                if (bullet.x < -50 || bullet.x > config.gameWidth + 50 || 
+                    bullet.y < -50 || bullet.y > config.gameHeight + 50) {
+                    config.bullets.splice(i, 1);
+                    continue;
+                }
+                
+                // Проверяем столкновение с Нео
+                if (checkCollision(
+                    bullet.x, bullet.y, bullet.size, 
+                    config.neoX + config.neoSize/2, config.neoY + config.neoSize/2, config.neoSize/2
+                )) {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+
+        // Рисуем пули
+        function drawBullets() {
+            config.ctx.fillStyle = '#f00';
+            
+            config.bullets.forEach(bullet => {
+                // Эффект свечения
+                const gradient = config.ctx.createRadialGradient(
+                    bullet.x, bullet.y, 0,
+                    bullet.x, bullet.y, bullet.size * 1.5
+                );
+                gradient.addColorStop(0, 'rgba(255, 0, 0, 0.8)');
+                gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+                
+                config.ctx.fillStyle = gradient;
+                config.ctx.beginPath();
+                config.ctx.arc(bullet.x, bullet.y, bullet.size * 1.5, 0, Math.PI * 2);
+                config.ctx.fill();
+                
+                // Ядро пули
+                config.ctx.fillStyle = '#f00';
+                config.ctx.beginPath();
+                config.ctx.arc(bullet.x, bullet.y, bullet.size/2, 0, Math.PI * 2);
+                config.ctx.fill();
+            });
+        }
+
+        // Проверка столкновения
+        function checkCollision(x1, y1, r1, x2, y2, r2) {
+            const dx = x1 - x2;
+            const dy = y1 - y2;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            return distance < r1 + r2;
+        }
+
+        // Эффект уклонения
+        function showDodgeEffect() {
+            config.dodgeEffect.style.left = `${config.neoX - 30}px`;
+            config.dodgeEffect.style.top = `${config.neoY - 30}px`;
+            config.dodgeEffect.style.opacity = '1';
+            
+            setTimeout(() => {
+                config.dodgeEffect.style.opacity = '0';
+            }, 300);
+        }
+
+        // Увеличиваем сложность
+        function increaseDifficulty() {
+            // Увеличиваем скорость пуль
+            config.bulletSpeed = Math.min(10, config.bulletSpeed + 0.5);
+            
+            // Уменьшаем интервал между пулями
+            config.bulletInterval = Math.max(200, config.bulletInterval - 50);
+            
+            // Увеличиваем количество пуль
+            if (config.gameTime % 15 === 0) {
+                createBullet();
+            }
+        }
+
+        // Основной игровой цикл
+        function gameLoop(timestamp) {
+            if (!config.isPlaying || config.isPaused) return;
+            
+            const deltaTime = timestamp - config.lastTime;
+            config.lastTime = timestamp;
+            
+            // Обновляем время игры
+            if (!config.isPaused) {
+                config.gameTime += deltaTime / 1000;
+                document.getElementById('time').textContent = Math.floor(config.gameTime);
+            }
+            
+            // Увеличиваем сложность каждые 5 секунд
+            if (Math.floor(config.gameTime) > 0 && Math.floor(config.gameTime) % 5 === 0) {
+                increaseDifficulty();
+            }
+            
+            // Обновляем эффект матрицы
+            updateMatrixEffect();
+            
+            // Обновляем и рисуем пули
+            updateBullets();
+            drawBullets();
+            
+            // Запрашиваем следующий кадр
+            config.gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // Обработка ввода с клавиатуры
+        function handleKeyDown(e) {
+            if (!config.isPlaying || config.isPaused) return;
+            
+            let moved = false;
+            const prevX = config.neoX;
+            const prevY = config.neoY;
+            
+            switch(e.key) {
+                case 'ArrowUp':
+                    config.neoY = Math.max(0, config.neoY - config.speed);
+                    moved = true;
+                    break;
+                case 'ArrowDown':
+                    config.neoY = Math.min(config.gameHeight - config.neoSize, config.neoY + config.speed);
+                    moved = true;
+                    break;
+                case 'ArrowLeft':
+                    config.neoX = Math.max(0, config.neoX - config.speed);
+                    moved = true;
+                    break;
+                case 'ArrowRight':
+                    config.neoX = Math.min(config.gameWidth - config.neoSize, config.neoX + config.speed);
+                    moved = true;
+                    break;
+            }
+            
+            if (moved) {
+                updateNeoPosition();
+                
+                // Проверяем, было ли уклонение от пули
+                config.bullets.forEach(bullet => {
+                    if (checkCollision(
+                        bullet.x, bullet.y, bullet.size, 
+                        prevX + config.neoSize/2, prevY + config.neoSize/2, config.neoSize/2
+                    )) {
+                        // Если была на предыдущем кадре, а сейчас нет - значит уклонились
+                        if (!checkCollision(
+                            bullet.x, bullet.y, bullet.size, 
+                            config.neoX + config.neoSize/2, config.neoY + config.neoSize/2, config.neoSize/2
+                        )) {
+                            config.dodges++;
+                            document.getElementById('dodges').textContent = config.dodges;
+                            showDodgeEffect();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Начало игры
+        function startGame() {
+            if (config.isPlaying) return;
+            
+            // Сброс параметров
+            config.neoX = config.gameWidth / 2 - config.neoSize / 2;
+            config.neoY = config.gameHeight / 2 - config.neoSize / 2;
+            config.bullets = [];
+            config.gameTime = 0;
+            config.dodges = 0;
+            config.bulletSpeed = 5;
+            config.bulletInterval = 800;
+            config.isPlaying = true;
+            config.isPaused = false;
+            
+            updateNeoPosition();
+            document.getElementById('time').textContent = '0';
+            document.getElementById('dodges').textContent = '0';
+            document.getElementById('start-btn').textContent = 'РЕСТАРТ';
+            document.getElementById('pause-btn').disabled = false;
+            
+            // Запускаем игровой цикл
+            config.lastTime = 0;
+            config.gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        // Пауза игры
+        function togglePause() {
+            if (!config.isPlaying) return;
+            
+            config.isPaused = !config.isPaused;
+            document.getElementById('pause-btn').textContent = config.isPaused ? 'ПРОДОЛЖИТЬ' : 'ПАУЗА';
+            
+            if (!config.isPaused) {
+                config.lastTime = performance.now();
+                config.gameLoopId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Конец игры
+        function gameOver() {
+            config.isPlaying = false;
+            cancelAnimationFrame(config.gameLoopId);
+            
+            // Обновляем рекорд
+            if (config.gameTime > config.highScore) {
+                config.highScore = Math.floor(config.gameTime);
+                localStorage.setItem('matrixHighScore', config.highScore);
+                document.getElementById('high-score').textContent = config.highScore;
+            }
+            
+            // Эффект проигрыша
+            config.neo.style.backgroundColor = '#f00';
+            config.neo.style.boxShadow = '0 0 30px #f00';
+            
+            setTimeout(() => {
+                config.neo.style.backgroundColor = '#0f0';
+                config.neo.style.boxShadow = '0 0 15px #0f0';
+                alert(`Агенты схватили тебя!\nТы продержался: ${Math.floor(config.gameTime)} секунд\nУклонений: ${config.dodges}`);
+            }, 500);
+        }
+
+        // Инициализация при загрузке
+        window.onload = () => {
+            initGame();
+            
+            // Назначаем обработчики
+            document.getElementById('start-btn').addEventListener('click', startGame);
+            document.getElementById('pause-btn').addEventListener('click', togglePause);
+            document.addEventListener('keydown', handleKeyDown);
+        };
+    </script>
+</body>
+</html>
